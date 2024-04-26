@@ -1,7 +1,6 @@
 import torch as tr
 import gymnasium as gym
 
-
 def train_epoch(train_env, agent, current_epoch, device, writer = None):
     rewards = 0
     state, _ = train_env.reset()
@@ -33,7 +32,7 @@ def train_epoch(train_env, agent, current_epoch, device, writer = None):
     loss = loss_actor + loss_critic
     agent.actor_scheduler.step(loss_actor)
     agent.critic_scheduler.step(loss_critic)
-    return rewards, loss.cpu().detach().numpy()
+    return rewards, loss.item()
 
 
 

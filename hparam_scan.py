@@ -19,7 +19,8 @@ def objective(config):
     Rewards = 0.
     for epoch in range(int(config['n_epochs'])):
         reward, loss = train_epoch(train_env, agent, epoch, device)
-        if np.isnan(loss): print("Loss is NaN")
+        if np.isnan(loss):
+            print("Loss is NaN")
         Rewards += reward
         train.report({"loss" : loss})
 
@@ -43,19 +44,19 @@ algo = OptunaSearch(sampler = sampler)
 
 scheduler = ASHAScheduler(
     max_t=int(config['n_epochs']),  # The maximum number of training iterations (e.g., epochs)
-    grace_period=10,    # The number of epochs to run before a trial can be stopped
+    grace_period=80,    # The number of epochs to run before a trial can be stopped
     reduction_factor=2,  # Reduce the number of trials by a factor of 2 each round
 )
 
 tuner = tune.Tuner(
     tune.with_resources(objective,
-                        resources = {'cpu' : 8, 'gpu': 1}),
+                        resources = {'cpu' : 7, 'gpu': 1}),
     #objective,
     tune_config = tune.TuneConfig(
         metric = 'loss',
         mode = 'min',
         search_alg = algo,
-        num_samples = 2,
+        num_samples = 20,
         scheduler = scheduler
     ),
     run_config = train.RunConfig(

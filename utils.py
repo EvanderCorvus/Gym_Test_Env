@@ -19,16 +19,3 @@ def hyperparams_dict(section):
             typed_params[key] = value
     
     return typed_params
-
-
-class Logger():
-    def __init__(self):
-        self.metrics = {}
-    
-    def log(self, name, value):
-        if name not in self.metrics:
-            self.metrics[name] = []
-        self.metrics[name].append(value)
-
-    def get_metric(self, name):
-        return self.metrics.get(name)
