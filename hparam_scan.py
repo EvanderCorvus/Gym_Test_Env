@@ -2,7 +2,7 @@ import gymnasium as gym
 from agents import *
 from utils import *
 from ray import train, tune
-from gym_train_utils import train_epoch
+from train_utils import train_epoch
 import json
 from ray.tune.search.optuna import OptunaSearch
 from optuna.samplers import TPESampler, CmaEsSampler
@@ -16,7 +16,6 @@ def objective(config):
     train_env = gym.make('Pendulum-v1', g=9.81)
     agent = SACAgent(config,
                      device).to(device)
-    
     Rewards = 0.
     for epoch in range(int(config['n_epochs'])):
         reward, loss = train_epoch(train_env, agent, epoch, device)

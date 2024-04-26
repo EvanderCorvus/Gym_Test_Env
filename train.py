@@ -1,4 +1,4 @@
-from gym_train_utils import train_epoch, test_loop
+from train_utils import train_epoch, test_loop
 from tqdm import tqdm
 import gymnasium as gym
 import os
@@ -21,11 +21,8 @@ agent = SACAgent(config,
 experiment_number = len(os.listdir('logs/experiments'))+1
 os.makedirs(f'logs/experiments/{experiment_number}')
 writer = SummaryWriter(f'logs/experiments/{experiment_number}')
-
-for epoch in tqdm(range(int(config['n_epochs']))):
-    for key, value in config.items():
+for key, value in config.items():
         writer.add_text(key, str(value))
+for epoch in tqdm(range(int(config['n_epochs']))):
     reward = train_epoch(train_env, agent, epoch, device, writer)
-    
-
 test_loop(agent, device)
