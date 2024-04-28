@@ -292,15 +292,15 @@ class SACAgent(nn.Module):
         self.critic_optimizer = tr.optim.Adam(self.critic.parameters(), 
                                               lr=config["learning_rate_critic"])
 
-        self.actor_scheduler = ReduceLROnPlateau(self.actor_optimizer,
-                                    #step_size=config['step_size_actor'],
-                                    factor=config['gamma_actor'],
-                                    threshold=1e-2)
+        self.actor_scheduler = StepLR(self.actor_optimizer,
+                                    step_size=config['step_size_actor'],
+                                    gamma=config['gamma_actor'])
+                                    #threshold=1e-2)
         
-        self.critic_scheduler = ReduceLROnPlateau(self.critic_optimizer,
-                                    #step_size=config['step_size_critic'],
-                                    factor=config['gamma_critic'],
-                                    threshold=1e-2)
+        self.critic_scheduler = StepLR(self.critic_optimizer,
+                                    step_size=config['step_size_critic'],
+                                    gamma=config['gamma_critic'])
+                                    #threshold=1e-2)
         
     def act(self, state, deterministic = True):
         with tr.no_grad():

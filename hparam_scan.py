@@ -8,21 +8,26 @@ from ray.tune.search.optuna import OptunaSearch
 from optuna.samplers import TPESampler, CmaEsSampler
 from ray.tune.schedulers import ASHAScheduler
 import time
+import ray
 
 if not tr.cuda.is_available(): raise Exception('CUDA unaviable')
+ray.init()
 
 def objective(config):
-    device = tr.device('cuda' if tr.cuda.is_available() else 'cpu')
-    train_env = gym.make('Pendulum-v1', g=9.81)
-    agent = SACAgent(config,
-                     device).to(device)
-    Rewards = 0.
-    for epoch in range(int(config['n_epochs'])):
-        reward, loss = train_epoch(train_env, agent, epoch, device)
-        Rewards += reward
-        train.report({"loss" : loss})
+    try:
+        device = tr.device('cuda' if tr.cuda.is_available() else 'cpu')
+        train_env = gym.make('Pendulum-v1', g=9.81)
+        agent = SACAgent(config,
+                        device).to(device)
+        Rewards = 0.
+        for epoch in range(int(config['n_epochs'])):
+            reward, loss = train_epoch(train_env, agent, epoch, device)
+            Rewards += reward
+            train.report({"loss" : loss})
 
-    train_env.close()
+        train_env.close()
+    except Exception as e: raise e
+
     return {"loss" : loss}
     
 config = hyperparams_dict("Agent")
@@ -50,7 +55,7 @@ scheduler = ASHAScheduler(
 
 tuner = tune.Tuner(
     tune.with_resources(objective,
-                        resources = {'cpu' : 20, 'gpu': 1}),
+                        resources = {'cpu' : 8, 'gpu': 1}),
     #objective,
     tune_config = tune.TuneConfig(
         metric = 'loss',
@@ -60,7 +65,8 @@ tuner = tune.Tuner(
         scheduler = scheduler
     ),
     run_config = train.RunConfig(
-        verbose=0
+        verbose=1,
+        failure_config=train.FailureConfig(fail_fast=True),
     ),
     param_space = config
 )
