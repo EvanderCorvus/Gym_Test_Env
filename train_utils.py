@@ -30,8 +30,8 @@ def train_epoch(train_env, agent, current_epoch, device, writer = None):
         step += 1
 
     loss = loss_actor + loss_critic
-    agent.actor_scheduler.step(loss_actor)
-    agent.critic_scheduler.step(loss_critic)
+    agent.actor_scheduler.step()
+    agent.critic_scheduler.step()
     return rewards, loss.item()
 
 def test_loop(agent, device):

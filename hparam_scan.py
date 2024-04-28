@@ -27,9 +27,12 @@ def objective(config):
     
 config = hyperparams_dict("Agent")
 search_space = {
-    'learning_rate_actor': tune.loguniform(1e-4, 1e-2),  #tune.grid_search(np.linspace(1e-5, 3e-3, 5)),
-    'entropy_coeff': tune.uniform(0.01, 0.2),
-    'hidden_dims_actor': tune.choice([[64, 64, 64], [512, 512, 512], [1024, 1024]]),
+    'learning_rate_actor': tune.loguniform(1e-4, 1e-3),  #tune.grid_search(np.linspace(1e-5, 3e-3, 5)),
+    'learning_rate_critic': tune.loguniform(1e-3, 1e-2),
+    'entropy_coeff': tune.uniform(0.01, 0.3),
+    'hidden_dims_actor': tune.choice([[64, 64, 64], [512, 512, 512], [1024, 1024, 1024]]),
+    'step_size_actor' : tune.choice([10, 20, 25]),
+    'step_size_critic' : tune.choice([10, 20, 25]),
 }
 # Overwrite the default config with the search space
 for key in search_space.keys():
@@ -42,12 +45,12 @@ algo = OptunaSearch(sampler = sampler)
 scheduler = ASHAScheduler(
     max_t=int(config['n_epochs']),  # The maximum number of training iterations (e.g., epochs)
     grace_period=config['grace_period'],    # The number of epochs to run before a trial can be stopped
-    reduction_factor=config['reduction_factor'],  # Reduce the number of trials by a factor of 2 each round
+    reduction_factor=config['reduction_factor'],  # Reduce the number of trials that factor
 )
 
 tuner = tune.Tuner(
     tune.with_resources(objective,
-                        resources = {'cpu' : 8, 'gpu': 1}),
+                        resources = {'cpu' : 20, 'gpu': 1}),
     #objective,
     tune_config = tune.TuneConfig(
         metric = 'loss',
@@ -57,7 +60,7 @@ tuner = tune.Tuner(
         scheduler = scheduler
     ),
     run_config = train.RunConfig(
-        verbose=1
+        verbose=0
     ),
     param_space = config
 )
