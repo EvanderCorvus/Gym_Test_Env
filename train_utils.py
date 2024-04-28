@@ -1,7 +1,7 @@
 import torch as tr
 import gymnasium as gym
 
-def train_epoch(train_env, agent, current_epoch, device, writer = None):
+def train_epoch(train_env, agent, current_epoch, device, writer = None, decay_entropy = False):
     rewards = 0
     state, _ = train_env.reset()
     step = 0
@@ -15,7 +15,7 @@ def train_epoch(train_env, agent, current_epoch, device, writer = None):
                                 tr.tensor([reward]).float().to(device), 
                                 tr.from_numpy(next_state).unsqueeze(0).float().to(device))
 
-        loss_actor, loss_critic = agent.update(1)
+        loss_actor, loss_critic = agent.update()
 
         if writer != None:
             writer.add_scalar('loss_actor', loss_actor, (200*current_epoch)+step)
@@ -32,6 +32,7 @@ def train_epoch(train_env, agent, current_epoch, device, writer = None):
     loss = loss_actor + loss_critic
     agent.actor_scheduler.step()
     agent.critic_scheduler.step()
+    if decay_entropy: agent.decay_entropy()
     return rewards, loss.item()
 
 def test_loop(agent, device):

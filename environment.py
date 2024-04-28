@@ -48,7 +48,7 @@ class Environment(gym.Env):
             v = e + v_f
             next_pos = pos_i + v*self.dt
 
-            # No-Slip Boundary Condition
+            
             if not self.observation_space[f'agent_{i}'].contains(next_pos):
                 next_pos = np.clip(next_pos, 0., self.size)
 

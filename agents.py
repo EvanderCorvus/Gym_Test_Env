@@ -13,15 +13,15 @@ LOG_STD_MIN = -20
 class Actor(nn.Module):
     def __init__(self, config, device):
         super().__init__()
-
-        self.net = NNSequential([config["state_dim"]]+config["hidden_dims_actor"], nn.LeakyReLU, nn.LeakyReLU, batch_norm=False)
-        self.mu_layer = nn.Linear(config["hidden_dims_actor"][-1], config["action_dim"])
+        fc = [config["hidden_dims_actor"]]*config['num_hidden_layers_actor']
+        self.net = NNSequential([config["state_dim"]]+fc, nn.LeakyReLU, nn.LeakyReLU, batch_norm=False)
+        self.mu_layer = nn.Linear(config["hidden_dims_actor"], config["action_dim"])
         # self.mu_layer = nn.Sequential(
-        #     nn.Linear(config["hidden_dims"][-1], action_dim),
+        #     nn.Linear(config["hidden_dims"], action_dim),
         #     nn.Tanh()
         # )
         
-        self.log_std_layer = nn.Linear(config["hidden_dims_actor"][-1], config["action_dim"])
+        self.log_std_layer = nn.Linear(config["hidden_dims_actor"], config["action_dim"])
         self.act_scaling = tr.tensor(config['act_scaling']).float().to(device)
 
     def forward(self, state, deterministic = False, with_logprob = False):
@@ -55,13 +55,11 @@ class Actor(nn.Module):
         # pi_action % (2*tr.pi)
         # tr.atan2(pi_action[:, 0], pi_action[:, 1])
 
-
-
 class Critic(nn.Module):
     def __init__(self, config):
         super().__init__()
-        
-        self.net = NNSequential([config['state_dim']+config['action_dim']] + config["hidden_dims_critic"] + [1], nn.LeakyReLU, batch_norm=False)
+        fc = [config["hidden_dims_critic"]]*config['num_hidden_layers_critic']
+        self.net = NNSequential([config['state_dim']+config['action_dim']] + fc + [1], nn.LeakyReLU)
         
     def forward(self, state, action):
         state_action = tr.cat((state, action), dim=1)
@@ -80,9 +78,8 @@ class TwinCritics(nn.Module):
     
     def Q1(self, state, action):
         return self.net1(state, action)
-    
-
-class DDPGAgent(nn.Module):
+          
+class SimpleAgent(nn.Module):
     def __init__(self, config, device):
         super().__init__()
         self.gamma = config["future_discount_factor"]
@@ -92,11 +89,11 @@ class DDPGAgent(nn.Module):
         self.grad_clip_actor = config["grad_clip_actor"]
         self.replay_buffer = ReplayBuffer(config['buffer_size'])
         self.device = device
-        self.update_frequency = config["update_frequency"]
-        self.target_noise_std = config["target_noise_std_actor"]
 
-        self.actor = Actor(config, device)
-        self.critic = TwinCritics(config)
+        self.loss_function = nn.MSELoss()
+
+        self.actor = Actor(config)
+        self.critic = Critic(config)
 
         self.target_actor = deepcopy(self.actor)
         self.target_critic = deepcopy(self.critic)
@@ -110,116 +107,12 @@ class DDPGAgent(nn.Module):
         self.critic_optimizer = tr.optim.Adam(self.critic.parameters(), lr=config["learning_rate_critic"])
 
         self.actor_scheduler = StepLR(self.actor_optimizer,
-                                    step_size=config['step_size_actor'],
+                                    step_size=config['n_epochs']//4,
                                     gamma=config['gamma_actor'])
         
         self.critic_scheduler = StepLR(self.critic_optimizer,
-                                    step_size=config['step_size_critic'],
+                                    step_size=config['n_epochs']//4,
                                     gamma=config['gamma_critic'])
-                                
-        self.loss_function = nn.MSELoss()
-
-    def act(self, state, deterministic = True):
-        with tr.no_grad():
-            return self.actor(state, deterministic)
-        
-    def _update_target_networks(self):
-        with tr.no_grad():
-            for p, p_target in zip(self.actor.parameters(), self.target_actor.parameters()):
-                p_target.data.mul_(self.polyak_tau)
-                p_target.data.add_((1-self.polyak_tau) * p.data)
-            for p, p_target in zip(self.critic.parameters(), self.target_critic.parameters()):
-                p_target.data.mul_(self.polyak_tau)
-                p_target.data.add_((1-self.polyak_tau) * p.data)
-
-    
-    def update(self, step):
-        state, action, reward, next_state = self.replay_buffer.sample(min(self.batch_size, len(self.replay_buffer)))
-        #if state.shape[1] != 3 or next_state.shape[1] != 3 or action.shape[1] != 1: raise Exception('Invalid shapes')
-        
-        # Update Critics
-        
-        
-        Q1, Q2 = self.critic(state, action)
-
-        with tr.no_grad():
-            noise = tr.normal(0, self.target_noise_std, size=(min(self.batch_size, len(self.replay_buffer)), 1)).to(self.device)
-            next_action = tr.clamp(self.target_actor(next_state).unsqueeze(1) + noise, -tr.pi, tr.pi)
-            #next_action = self.target_actor(next_state)#.unsqueeze(1)
-            Q1_next, Q2_next = self.target_critic(next_state, next_action)
-            Q_next = tr.min(Q1_next, Q2_next)
-            target = reward + self.gamma * Q_next
-
-        loss_critic = F.mse_loss(Q1, target) + F.mse_loss(Q2, target)
-        
-        self.critic_optimizer.zero_grad()
-        loss_critic.backward() # retain_graph=True must be true because the same transition can be sampled multiple times
-        
-        #tr.nn.utils.clip_grad_norm_(self.critic1.parameters(), self.grad_clip_critic)
-        #tr.nn.utils.clip_grad_norm_(self.critic2.parameters(), self.grad_clip_critic)
-        self.critic_optimizer.step()
-
-        # Update Actor
-        loss_actor = None
-        if step % self.update_frequency == 0:
-            self.actor_optimizer.zero_grad()
-
-            proposed_action = self.actor(state)#.unsqueeze(1)
-            Q = self.critic.Q1(state, proposed_action) #target_
-            loss_actor = -Q.mean()
-            loss_actor.backward()
-
-            #tr.nn.utils.clip_grad_norm_(self.actor.parameters(), self.grad_clip_actor)
-            self.actor_optimizer.step()
-
-            # Update Target Networks
-            self._update_target_networks()
-            
-
-        # Swtich Flag
-        #self.flag = not self.flag
-
-        return loss_actor, loss_critic
-        
-class SimpleAgent(nn.Module):
-    def __init__(self, config, device):
-        super().__init__()
-        self.gamma = config["future_discount_factor"]
-        self.polyak_tau = config["polyak_tau"]
-        self.batch_size = config["batch_size"]
-        self.grad_clip_critic = config["grad_clip_critic"]
-        self.grad_clip_actor = config["grad_clip_actor"]
-        self.replay_buffer = ReplayBuffer(config['buffer_size'])
-        self.target_noise_std = config["target_noise_std_actor"]
-        self.update_frequency = 1
-        self.device = device
-
-        self.loss_function = nn.MSELoss()
-
-        self.actor = Actor(config)
-        self.critic = Critic(config)
-
-        self.target_actor = Actor(config)
-        self.target_actor.load_state_dict(self.actor.state_dict())
-
-        self.target_critic = Critic(config)
-        self.target_critic.load_state_dict(self.critic.state_dict())
-
-        for p in self.target_actor.parameters():
-            p.requires_grad = False
-        for p in self.target_critic.parameters():
-            p.requires_grad = False
-
-        self.actor_optimizer = tr.optim.Adam(self.actor.parameters(), lr=config["learning_rate_actor"])
-        self.critic_optimizer = tr.optim.Adam(self.critic.parameters(), lr=config["learning_rate_critic"])
-
-        self.actor_scheduler = StepLR(self.actor_optimizer,
-                                    step_size=config['step_size_actor'],
-                                    gamma=config['gamma_actor'])
-        
-        self.critic_scheduler = StepLR(self.critic_optimizer,
-                                    step_size=config['step_size_critic'],
-                                    gamma=config['gammag_critic'])
     
     def act(self, state, deterministic = True):
         with tr.no_grad():
@@ -262,7 +155,6 @@ class SimpleAgent(nn.Module):
 
         return loss_actor, loss_critic
     
-
 class SACAgent(nn.Module):
     def __init__(self, config, device):
         super().__init__()
@@ -270,7 +162,6 @@ class SACAgent(nn.Module):
         self.entropy_coeff = config["entropy_coeff"]
         self.polyak_tau = config["polyak_tau"]
         self.batch_size = config["batch_size"]
-        self.update_frequency = 1
         self.grad_clip_critic = config["grad_clip_critic"]
         self.grad_clip_actor = config["grad_clip_actor"]
         self.replay_buffer = ReplayBuffer(config['buffer_size'])
@@ -293,14 +184,12 @@ class SACAgent(nn.Module):
                                               lr=config["learning_rate_critic"])
 
         self.actor_scheduler = StepLR(self.actor_optimizer,
-                                    step_size=config['step_size_actor'],
+                                    step_size=config['n_epochs']//4,
                                     gamma=config['gamma_actor'])
-                                    #threshold=1e-2)
         
         self.critic_scheduler = StepLR(self.critic_optimizer,
-                                    step_size=config['step_size_critic'],
+                                    step_size=config['n_epochs']//4,
                                     gamma=config['gamma_critic'])
-                                    #threshold=1e-2)
         
     def act(self, state, deterministic = True):
         with tr.no_grad():
@@ -315,7 +204,7 @@ class SACAgent(nn.Module):
                 p_target.data.mul_(self.polyak_tau)
                 p_target.data.add_((1-self.polyak_tau) * p.data)
 
-    def update(self, step):
+    def update(self):
         state, action, reward, next_state = self.replay_buffer.sample(min(self.batch_size, len(self.replay_buffer)))
 
         # Update Critic
@@ -324,10 +213,12 @@ class SACAgent(nn.Module):
             action_next, logp_pi = self.actor(next_state, with_logprob=True)
             Q1_next, Q2_next = self.target_critic(next_state, action_next)
             Q_next = tr.min(Q1_next, Q2_next)
-            target = reward + self.gamma * (Q_next - self.entropy_coeff * logp_pi.unsqueeze(1))
+            logp_pi = logp_pi.unsqueeze(1)
+            if Q_next.shape != logp_pi.shape: raise Exception('Shape Missmatch (Q_next, logp_pi):', Q_next.shape, logp_pi.shape)
+            target = reward + self.gamma * (Q_next - self.entropy_coeff * logp_pi)
 
         if target.shape != Q1.shape: raise Exception(Q1.shape, target.shape, reward.shape, Q_next.shape, logp_pi.shape)
-        #raise Exception(Q1.shape, target.shape)
+        
         loss_critic = F.mse_loss(Q1, target) + F.mse_loss(Q2, target)
         self.critic_optimizer.zero_grad()
         loss_critic.backward()
@@ -353,7 +244,9 @@ class SACAgent(nn.Module):
             p.requires_grad = True
         
         return loss_actor, loss_critic
-
+    
+    def decay_entropy(self):
+        self.entropy_coeff *= 0.99
 
 class MergedSAC(nn.Module):
     def __init__(self, config, device):
@@ -365,12 +258,12 @@ class MergedSAC(nn.Module):
 
         self.shared_layer = NNSequential([config["state_dim"]] + config["shared_hidden_dims"], nn.LeakyReLU, batch_norm=False)
         # Actor Layers
-        self.mu_layer = nn.Linear(config["shared_hidden_dims"][-1], config["action_dim"])
-        self.log_std_layer = nn.Linear(config["shared_hidden_dims"][-1], config["action_dim"])
+        self.mu_layer = nn.Linear(config["shared_hidden_dims"], config["action_dim"])
+        self.log_std_layer = nn.Linear(config["shared_hidden_dims"], config["action_dim"])
         self.act_scaling = tr.tensor(config['act_scaling']).float().to(device)
 
         # Critic Layers
-        self.critic_net = nn.Linear(config["shared_hidden_dims"][-1]+config['acion_dim'], 1)
+        self.critic_net = nn.Linear(config["shared_hidden_dims"]+config['acion_dim'], 1)
 
 
     def forward(self, state):

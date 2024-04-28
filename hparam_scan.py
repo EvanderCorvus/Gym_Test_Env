@@ -11,7 +11,7 @@ import time
 import ray
 
 if not tr.cuda.is_available(): raise Exception('CUDA unaviable')
-ray.init()
+# ray.init(object_store_memory=int(16e9)) # Limit Memory to 16GB
 
 def objective(config):
     try:
@@ -21,23 +21,21 @@ def objective(config):
                         device).to(device)
         Rewards = 0.
         for epoch in range(int(config['n_epochs'])):
-            reward, loss = train_epoch(train_env, agent, epoch, device)
+            reward, loss = train_epoch(train_env, agent, epoch, device, decay_entropy=True)
             Rewards += reward
-            train.report({"loss" : loss})
+            train.report({"reward" : reward})
 
         train_env.close()
     except Exception as e: raise e
 
-    return {"loss" : loss}
+    return {"reward" : reward}
     
 config = hyperparams_dict("Agent")
 search_space = {
-    'learning_rate_actor': tune.loguniform(1e-4, 1e-3),  #tune.grid_search(np.linspace(1e-5, 3e-3, 5)),
-    'learning_rate_critic': tune.loguniform(1e-3, 1e-2),
-    'entropy_coeff': tune.uniform(0.01, 0.3),
-    'hidden_dims_actor': tune.choice([[64, 64, 64], [512, 512, 512], [1024, 1024, 1024]]),
-    'step_size_actor' : tune.choice([10, 20, 25]),
-    'step_size_critic' : tune.choice([10, 20, 25]),
+    'learning_rate_actor': tune.loguniform(1e-5, 1e-3),  #tune.grid_search(np.linspace(1e-5, 3e-3, 5)),
+    'entropy_coeff': tune.uniform(1e-4, 1e-2),
+    # 'hidden_dims_actor': tune.choice([256, 512, 1024]),
+    # 'num_hidden_layers_actor': tune.choice([2, 3, 4]),
 }
 # Overwrite the default config with the search space
 for key in search_space.keys():
@@ -49,7 +47,7 @@ algo = OptunaSearch(sampler = sampler)
 
 scheduler = ASHAScheduler(
     max_t=int(config['n_epochs']),  # The maximum number of training iterations (e.g., epochs)
-    grace_period=config['grace_period'],    # The number of epochs to run before a trial can be stopped
+    grace_period=int(config['n_epochs']//10),    # The number of epochs to run before a trial can be stopped
     reduction_factor=config['reduction_factor'],  # Reduce the number of trials that factor
 )
 
@@ -58,8 +56,8 @@ tuner = tune.Tuner(
                         resources = {'cpu' : 8, 'gpu': 1}),
     #objective,
     tune_config = tune.TuneConfig(
-        metric = 'loss',
-        mode = 'min',
+        metric = 'reward',
+        mode = 'max',
         search_alg = algo,
         num_samples = config['num_samples'],
         scheduler = scheduler
@@ -79,4 +77,4 @@ fname = 'logs/best_hyperparams.json'
 with open(fname, 'w') as f:
     json.dump(results.get_best_result().config, f)
 
-print(results.get_best_result(metric="loss", mode="min").config)
+print(results.get_best_result().config)
