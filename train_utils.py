@@ -34,8 +34,6 @@ def train_epoch(train_env, agent, current_epoch, device, writer = None):
     agent.critic_scheduler.step(loss_critic)
     return rewards, loss.item()
 
-
-
 def test_loop(agent, device):
     test_env = gym.make('Pendulum-v1', g=9.81, render_mode='human')
     # Test Loop:
