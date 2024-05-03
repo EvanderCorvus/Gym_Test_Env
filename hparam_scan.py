@@ -21,7 +21,7 @@ def objective(config):
                         device).to(device)
         Rewards = 0.
         for epoch in range(int(config['n_epochs'])):
-            reward, loss = train_epoch(train_env, agent, epoch, device, decay_entropy=True)
+            reward, loss = train_epoch(train_env, agent, epoch, device)
             Rewards += reward
             train.report({"reward" : reward})
 
@@ -32,10 +32,10 @@ def objective(config):
     
 config = hyperparams_dict("Agent")
 search_space = {
-    # 'learning_rate_actor': tune.loguniform(1e-5, 1e-3),  #tune.grid_search(np.linspace(1e-5, 3e-3, 5)),
-    # 'entropy_coeff': tune.uniform(1e-4, 1e-2),
-    # 'entropy_decay_factor': tune.choice([0.9, 0.95, 0.99]),
-    # 'hidden_dims_actor': tune.choice([64, 256, 512, 1024]),
+    'learning_rate_actor': tune.loguniform(1e-6, 3e-4),  #tune.grid_search(np.linspace(1e-5, 3e-3, 5)),
+    'entropy_coeff': tune.uniform(1e-5, 1e-2),
+    'entropy_decay_factor': tune.choice([0.9, 0.95, 1.]),
+    'hidden_dims_actor': tune.choice([64, 256, 512, 1024]),
     # 'num_hidden_layers_actor': tune.choice([2, 3, 4]),
     # 'batch_size' : tune.choice([64, 128, 256, 512]),
     # 'grad_clip_actor': tune.uniform(1., 10.0),
@@ -72,10 +72,8 @@ tuner = tune.Tuner(
     param_space = config
 )
 
-start = time.time()
+
 results = tuner.fit()
-end = time.time()
-print(f"Fit Time: {np.round((end-start)/60,1)} Minutes")
 fname = 'logs/best_hyperparams.json'
 with open(fname, 'w') as f:
     json.dump(results.get_best_result().config, f)

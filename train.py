@@ -10,11 +10,13 @@ from torch.utils.tensorboard.writer import SummaryWriter
 if not tr.cuda.is_available(): raise Exception('CUDA unaviable')
 device = tr.device('cuda' if tr.cuda.is_available() else 'cpu')
 
-# with open('logs/best_hyperparams.json', 'r') as f:
-#     config = json.load(f)
+with open('logs/best_hyperparams.json', 'r') as f:
+    config = json.load(f)
 
-config = hyperparams_dict("Agent")
+# config = hyperparams_dict("Agent")
 train_env = gym.make('Pendulum-v1', g=9.81)
+
+
 agent = SACAgent(config,
                  device).to(device)
 

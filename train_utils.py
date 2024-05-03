@@ -1,9 +1,17 @@
 import torch as tr
 import gymnasium as gym
+import numpy as np
+from numpy import random as rnd
 
 def train_epoch(train_env, agent, current_epoch, device, writer = None):
     rewards = 0
-    state, _ = train_env.reset()
+    train_env.reset()
+    # Enforce Custom Init
+    theta_init = rnd.uniform(3*np.pi/4, np.pi)*rnd.choice([-1,1])
+    thetadot_init = rnd.uniform(-1.,1)
+    train_env.state = np.array([theta_init, thetadot_init])
+    state = np.array([np.cos(theta_init), np.sin(theta_init), thetadot_init])
+
     step = 0
     while True:
         gpu_state = tr.from_numpy(state).to(device).float()
