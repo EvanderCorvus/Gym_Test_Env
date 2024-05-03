@@ -30,7 +30,6 @@ for epoch in tqdm(range(int(config['n_epochs']))):
     reward, loss = train_epoch(train_env, agent, epoch, device, writer)
     if np.isnan(loss):
         raise ValueError("Loss is NaN")
-    
 writer.close()
 
 test_loop(agent, device)

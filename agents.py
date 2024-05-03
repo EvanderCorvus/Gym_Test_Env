@@ -160,6 +160,7 @@ class SACAgent(nn.Module):
         super().__init__()
         self.gamma = config["future_discount_factor"]
         self.entropy_coeff = config["entropy_coeff"]
+        self.entropy_decay_factor = config["entropy_decay_factor"]
         self.polyak_tau = config["polyak_tau"]
         self.batch_size = config["batch_size"]
         self.grad_clip_critic = config["grad_clip_critic"]
@@ -246,7 +247,7 @@ class SACAgent(nn.Module):
         return loss_actor, loss_critic
     
     def decay_entropy(self):
-        self.entropy_coeff *= 0.99
+        self.entropy_coeff *= self.entropy_decay_factor
 
 class MergedSAC(nn.Module):
     def __init__(self, config, device):

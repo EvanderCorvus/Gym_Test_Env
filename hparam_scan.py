@@ -32,10 +32,13 @@ def objective(config):
     
 config = hyperparams_dict("Agent")
 search_space = {
-    'learning_rate_actor': tune.loguniform(1e-5, 1e-3),  #tune.grid_search(np.linspace(1e-5, 3e-3, 5)),
-    'entropy_coeff': tune.uniform(1e-4, 1e-2),
-    # 'hidden_dims_actor': tune.choice([256, 512, 1024]),
+    # 'learning_rate_actor': tune.loguniform(1e-5, 1e-3),  #tune.grid_search(np.linspace(1e-5, 3e-3, 5)),
+    # 'entropy_coeff': tune.uniform(1e-4, 1e-2),
+    # 'entropy_decay_factor': tune.choice([0.9, 0.95, 0.99]),
+    # 'hidden_dims_actor': tune.choice([64, 256, 512, 1024]),
     # 'num_hidden_layers_actor': tune.choice([2, 3, 4]),
+    # 'batch_size' : tune.choice([64, 128, 256, 512]),
+    # 'grad_clip_actor': tune.uniform(1., 10.0),
 }
 # Overwrite the default config with the search space
 for key in search_space.keys():
