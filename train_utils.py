@@ -1,19 +1,19 @@
 import torch as tr
 import gymnasium as gym
 
-def train_epoch(train_env, agent, current_epoch, device, writer = None, decay_entropy = False):
+def train_epoch(train_env, agent, current_epoch, device, writer = None):
     rewards = 0
     state, _ = train_env.reset()
     step = 0
     while True:
-        state = tr.from_numpy(state).to(device).float()
-        action = agent.actor(state)
-        env_action = action.cpu().detach().numpy()
-        next_state, reward, terminated, truncated, _ = train_env.step(env_action)
+        gpu_state = tr.from_numpy(state).to(device).float()
+        action = agent.actor(gpu_state).cpu().detach().numpy()
+        next_state, reward, terminated, truncated, _ = train_env.step(action)
 
-        agent.replay_buffer.add(state.unsqueeze(0).float(), action.unsqueeze(0).float().detach(),
-                                tr.tensor([reward]).float().to(device), 
-                                tr.from_numpy(next_state).unsqueeze(0).float().to(device))
+        agent.replay_buffer.add(state,
+                                action,
+                                [reward], 
+                                next_state)
 
         loss_actor, loss_critic = agent.update()
 
@@ -21,7 +21,7 @@ def train_epoch(train_env, agent, current_epoch, device, writer = None, decay_en
             writer.add_scalar('loss_actor', loss_actor, (200*current_epoch)+step)
             writer.add_scalar('loss_critic', loss_critic, (200*current_epoch)+step)
             writer.add_scalar('reward', reward, (200*current_epoch)+step)
-            writer.add_scalar('action', env_action, (200*current_epoch)+step)
+            writer.add_scalar('action', action, (200*current_epoch)+step)
 
         rewards += reward
         state = next_state
@@ -32,7 +32,7 @@ def train_epoch(train_env, agent, current_epoch, device, writer = None, decay_en
     loss = loss_actor + loss_critic
     agent.actor_scheduler.step()
     agent.critic_scheduler.step()
-    if decay_entropy: agent.decay_entropy()
+    agent.decay_entropy()
     return rewards, loss.item()
 
 def test_loop(agent, device):

@@ -79,7 +79,108 @@ class TwinCritics(nn.Module):
     def Q1(self, state, action):
         return self.net1(state, action)
           
-class SimpleAgent(nn.Module):
+class SACAgent(nn.Module):
+    def __init__(self, config, device):
+        super().__init__()
+        self.gamma = config["future_discount_factor"]
+        self.entropy_coeff = config["entropy_coeff"]
+        self.entropy_decay_factor = config["entropy_decay_factor"]
+        self.polyak_tau = config["polyak_tau"]
+        self.batch_size = config["batch_size"]
+        self.grad_clip_critic = config["grad_clip_critic"]
+        self.grad_clip_actor = config["grad_clip_actor"]
+        self.replay_buffer = ReplayBuffer(config['buffer_size'])
+        self.device = device
+
+        self.actor = Actor(config, device)
+        self.critic = TwinCritics(config)
+
+        self.target_actor = deepcopy(self.actor)
+        self.target_critic = deepcopy(self.critic)
+
+        for p in self.target_actor.parameters():
+            p.requires_grad = False
+        for p in self.target_critic.parameters():
+            p.requires_grad = False
+
+        self.actor_optimizer = tr.optim.Adam(self.actor.parameters(),
+                                            lr=config["learning_rate_actor"])
+        self.critic_optimizer = tr.optim.Adam(self.critic.parameters(), 
+                                              lr=config["learning_rate_critic"])
+
+        self.actor_scheduler = StepLR(self.actor_optimizer,
+                                    step_size=config['n_epochs']//4,
+                                    gamma=config['gamma_actor'])
+        
+        self.critic_scheduler = StepLR(self.critic_optimizer,
+                                    step_size=config['n_epochs']//4,
+                                    gamma=config['gamma_critic'])
+        
+    def act(self, state, deterministic = True):
+        with tr.no_grad():
+            return self.actor(state, deterministic)
+        
+    def _update_target_networks(self):
+        with tr.no_grad():
+            for p, p_target in zip(self.actor.parameters(), self.target_actor.parameters()):
+                p_target.data.mul_(self.polyak_tau)
+                p_target.data.add_((1-self.polyak_tau) * p.data)
+            for p, p_target in zip(self.critic.parameters(), self.target_critic.parameters()):
+                p_target.data.mul_(self.polyak_tau)
+                p_target.data.add_((1-self.polyak_tau) * p.data)
+
+    def update(self):
+        state, action, reward, next_state = self.replay_buffer.sample(self.batch_size)
+        # Move to GPU
+        state = tr.tensor(state, dtype=tr.float32, device=self.device)
+        action = tr.tensor(action, dtype=tr.float32, device=self.device)
+        reward = tr.tensor(reward, dtype=tr.float32, device=self.device)
+        next_state = tr.tensor(next_state, dtype=tr.float32, device=self.device)
+        shapes = [state.shape, action.shape, reward.shape, next_state.shape]
+        # Update Critic
+        Q1, Q2 = self.critic(state, action)
+        with tr.no_grad():
+            action_next, logp_pi = self.actor(next_state, with_logprob=True)
+            Q1_next, Q2_next = self.target_critic(next_state, action_next)
+            Q_next = tr.min(Q1_next, Q2_next)
+            logp_pi = logp_pi.unsqueeze(1)
+            if Q_next.shape != logp_pi.shape: raise Exception('Shape Missmatch (Q_next, logp_pi):', Q_next.shape, logp_pi.shape)
+            target = reward + self.gamma * (Q_next - self.entropy_coeff * logp_pi)
+
+        if target.shape != Q1.shape: raise Exception(Q1.shape, target.shape, reward.shape, Q_next.shape, logp_pi.shape)
+        
+        loss_critic = F.mse_loss(Q1, target) + F.mse_loss(Q2, target)
+        self.critic_optimizer.zero_grad()
+        loss_critic.backward()
+        tr.nn.utils.clip_grad_norm_(self.critic.parameters(), self.grad_clip_critic)
+        self.critic_optimizer.step()
+
+        # Update Actor
+        self.actor_optimizer.zero_grad()
+        for p in self.critic.parameters():
+            p.requires_grad = False
+
+        proposed_action, logp_pi = self.actor(state, with_logprob=True)
+        Q1, Q2 = self.critic(state, proposed_action)
+        Q = tr.min(Q1, Q2)
+        logp_pi = logp_pi.unsqueeze(1)
+        if Q.shape != logp_pi.shape: raise Exception('Shape Missmatch (Q, logp_pi):', Q.shape, logp_pi.shape)
+        loss_actor = (self.entropy_coeff * logp_pi - Q).mean()
+        loss_actor.backward()
+        tr.nn.utils.clip_grad_norm_(self.actor.parameters(), self.grad_clip_actor)
+        self.actor_optimizer.step()
+
+        for p in self.critic.parameters():
+            p.requires_grad = True
+        
+        return loss_actor, loss_critic
+    
+    def decay_entropy(self):
+        self.entropy_coeff *= self.entropy_decay_factor
+
+
+
+class MinimalAgent(nn.Module):
     def __init__(self, config, device):
         super().__init__()
         self.gamma = config["future_discount_factor"]
@@ -155,99 +256,6 @@ class SimpleAgent(nn.Module):
 
         return loss_actor, loss_critic
     
-class SACAgent(nn.Module):
-    def __init__(self, config, device):
-        super().__init__()
-        self.gamma = config["future_discount_factor"]
-        self.entropy_coeff = config["entropy_coeff"]
-        self.entropy_decay_factor = config["entropy_decay_factor"]
-        self.polyak_tau = config["polyak_tau"]
-        self.batch_size = config["batch_size"]
-        self.grad_clip_critic = config["grad_clip_critic"]
-        self.grad_clip_actor = config["grad_clip_actor"]
-        self.replay_buffer = ReplayBuffer(config['buffer_size'])
-        self.device = device
-
-        self.actor = Actor(config, device)
-        self.critic = TwinCritics(config)
-
-        self.target_actor = deepcopy(self.actor)
-        self.target_critic = deepcopy(self.critic)
-
-        for p in self.target_actor.parameters():
-            p.requires_grad = False
-        for p in self.target_critic.parameters():
-            p.requires_grad = False
-
-        self.actor_optimizer = tr.optim.Adam(self.actor.parameters(),
-                                            lr=config["learning_rate_actor"])
-        self.critic_optimizer = tr.optim.Adam(self.critic.parameters(), 
-                                              lr=config["learning_rate_critic"])
-
-        self.actor_scheduler = StepLR(self.actor_optimizer,
-                                    step_size=config['n_epochs']//4,
-                                    gamma=config['gamma_actor'])
-        
-        self.critic_scheduler = StepLR(self.critic_optimizer,
-                                    step_size=config['n_epochs']//4,
-                                    gamma=config['gamma_critic'])
-        
-    def act(self, state, deterministic = True):
-        with tr.no_grad():
-            return self.actor(state, deterministic)
-        
-    def _update_target_networks(self):
-        with tr.no_grad():
-            for p, p_target in zip(self.actor.parameters(), self.target_actor.parameters()):
-                p_target.data.mul_(self.polyak_tau)
-                p_target.data.add_((1-self.polyak_tau) * p.data)
-            for p, p_target in zip(self.critic.parameters(), self.target_critic.parameters()):
-                p_target.data.mul_(self.polyak_tau)
-                p_target.data.add_((1-self.polyak_tau) * p.data)
-
-    def update(self):
-        state, action, reward, next_state = self.replay_buffer.sample(min(self.batch_size, len(self.replay_buffer)))
-
-        # Update Critic
-        Q1, Q2 = self.critic(state, action)
-        with tr.no_grad():
-            action_next, logp_pi = self.actor(next_state, with_logprob=True)
-            Q1_next, Q2_next = self.target_critic(next_state, action_next)
-            Q_next = tr.min(Q1_next, Q2_next)
-            logp_pi = logp_pi.unsqueeze(1)
-            if Q_next.shape != logp_pi.shape: raise Exception('Shape Missmatch (Q_next, logp_pi):', Q_next.shape, logp_pi.shape)
-            target = reward + self.gamma * (Q_next - self.entropy_coeff * logp_pi)
-
-        if target.shape != Q1.shape: raise Exception(Q1.shape, target.shape, reward.shape, Q_next.shape, logp_pi.shape)
-        
-        loss_critic = F.mse_loss(Q1, target) + F.mse_loss(Q2, target)
-        self.critic_optimizer.zero_grad()
-        loss_critic.backward()
-        tr.nn.utils.clip_grad_norm_(self.critic.parameters(), self.grad_clip_critic)
-        self.critic_optimizer.step()
-
-        # Update Actor
-        self.actor_optimizer.zero_grad()
-        for p in self.critic.parameters():
-            p.requires_grad = False
-
-        proposed_action, logp_pi = self.actor(state, with_logprob=True)
-        Q1, Q2 = self.critic(state, proposed_action)
-        Q = tr.min(Q1, Q2)
-        logp_pi = logp_pi.unsqueeze(1)
-        if Q.shape != logp_pi.shape: raise Exception('Shape Missmatch (Q, logp_pi):', Q.shape, logp_pi.shape)
-        loss_actor = (self.entropy_coeff * logp_pi - Q).mean()
-        loss_actor.backward()
-        tr.nn.utils.clip_grad_norm_(self.actor.parameters(), self.grad_clip_actor)
-        self.actor_optimizer.step()
-
-        for p in self.critic.parameters():
-            p.requires_grad = True
-        
-        return loss_actor, loss_critic
-    
-    def decay_entropy(self):
-        self.entropy_coeff *= self.entropy_decay_factor
 
 class MergedSAC(nn.Module):
     def __init__(self, config, device):

@@ -55,9 +55,9 @@ class ReplayBuffer(object):
             rewards.append(reward)
             next_states.append(next_state)
             
-        return tr.cat(states, dim=0), tr.cat(actions, dim=0), tr.stack(rewards, dim=0), tr.cat(next_states, dim=0)
-    #np.array(states), np.array(actions), np.array(rewards), np.array(next_states), np.array(dones)
+        return np.array(states), np.array(actions), np.array(rewards), np.array(next_states)
 
+    
     def sample(self, batch_size):
         """Sample a batch of experiences.
 
@@ -78,7 +78,7 @@ class ReplayBuffer(object):
             next set of observations seen after executing act_batch
         """
         storage_length = len(self._storage)
-        idxes = [random.randint(0, storage_length - 1) for _ in range(batch_size)]
+        idxes = [random.randint(0, storage_length - 1) for _ in range(min(storage_length, batch_size))]
         return self._encode_sample(idxes)
 
 class SegmentTree(object):
