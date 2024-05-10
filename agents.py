@@ -2,7 +2,7 @@ import torch as tr
 import torch.nn as nn
 from agent_utils import NNSequential, ReplayBuffer
 from torch.distributions import Normal
-from torch.optim.lr_scheduler import StepLR, ReduceLROnPlateau
+from torch.optim.lr_scheduler import StepLR
 import numpy as np
 from copy import deepcopy
 import torch.nn.functional as F
@@ -16,21 +16,18 @@ class Actor(nn.Module):
         fc = [config["hidden_dims_actor"]]*config['num_hidden_layers_actor']
         self.net = NNSequential([config["state_dim"]]+fc, nn.LeakyReLU, nn.LeakyReLU, batch_norm=False)
         self.mu_layer = nn.Linear(config["hidden_dims_actor"], config["action_dim"])
-        # self.mu_layer = nn.Sequential(
-        #     nn.Linear(config["hidden_dims"], action_dim),
-        #     nn.Tanh()
-        # )
-        
+
         self.log_std_layer = nn.Linear(config["hidden_dims_actor"], config["action_dim"])
         self.act_scaling = tr.tensor(config['act_scaling']).float().to(device)
 
-    def forward(self, state, deterministic = False, with_logprob = False):
+    def forward(self, state, deterministic=False, with_logprob=False):
 
         net_out = self.net(state)
-        mu = self.mu_layer(net_out) # self.act_scaling*
+        mu = self.mu_layer(net_out)
 
         if deterministic:
             pi_action = mu
+            return self.act_scaling * tr.tanh(pi_action)
         else:
             log_std = self.log_std_layer(net_out)
             log_std = tr.clamp(log_std, LOG_STD_MIN, LOG_STD_MAX)
@@ -39,21 +36,17 @@ class Actor(nn.Module):
             pi_distribution = Normal(mu, std)
             pi_action = pi_distribution.rsample()
 
-        if with_logprob:
-            logp_pi = pi_distribution.log_prob(pi_action).sum(axis=-1)
-            logp_pi -= (2*(np.log(2) - pi_action - F.softplus(-2*pi_action))).sum(axis=1)
+            if with_logprob:
+                logp_pi = pi_distribution.log_prob(pi_action)
+                logp_pi -= (2*(np.log(2) - pi_action - F.softplus(-2*pi_action)))
+                logp_pi -= tr.log(self.act_scaling)
 
-            pi_action = self.act_scaling*tr.tanh(pi_action)
-            
-            return pi_action, logp_pi #tr.clamp(pi_action, -self.act_scaling, self.act_scaling)
-        else:
-            return self.act_scaling*tr.tanh(pi_action)
+                pi_action = self.act_scaling*tr.tanh(pi_action)
 
-        # Squash distribution
-        #pi_action = tr.tanh(pi_action)*tr.pi/2
-        # tr.clamp(pi_action, 0, 2*tr.pi)
-        # pi_action % (2*tr.pi)
-        # tr.atan2(pi_action[:, 0], pi_action[:, 1])
+                return pi_action, logp_pi
+
+            else: return pi_action
+
 
 class Critic(nn.Module):
     def __init__(self, config):
@@ -130,26 +123,26 @@ class SACAgent(nn.Module):
                 p_target.data.add_((1-self.polyak_tau) * p.data)
 
     def update(self):
-        state, action, reward, next_state = self.replay_buffer.sample(self.batch_size)
+        state, action, reward, next_state, done = self.replay_buffer.sample(self.batch_size)
         # Move to GPU
         state = tr.tensor(state, dtype=tr.float32, device=self.device)
         action = tr.tensor(action, dtype=tr.float32, device=self.device)
         reward = tr.tensor(reward, dtype=tr.float32, device=self.device)
         next_state = tr.tensor(next_state, dtype=tr.float32, device=self.device)
+        done = tr.tensor(done, dtype=tr.float32, device=self.device)
         shapes = [state.shape, action.shape, reward.shape, next_state.shape]
         # Update Critic
-        Q1, Q2 = self.critic(state, action)
+        q1, q2 = self.critic(state, action)
         with tr.no_grad():
             action_next, logp_pi = self.actor(next_state, with_logprob=True)
-            Q1_next, Q2_next = self.target_critic(next_state, action_next)
-            Q_next = tr.min(Q1_next, Q2_next)
-            logp_pi = logp_pi.unsqueeze(1)
-            if Q_next.shape != logp_pi.shape: raise Exception('Shape Missmatch (Q_next, logp_pi):', Q_next.shape, logp_pi.shape)
-            target = reward + self.gamma * (Q_next - self.entropy_coeff * logp_pi)
+            q1_next, q2_next = self.target_critic(next_state, action_next)
+            q_next = tr.min(q1_next, q2_next)
+            if q_next.shape != logp_pi.shape: raise Exception('Shape Missmatch (Q_next, logp_pi):', q_next.shape, logp_pi.shape)
+            target = reward + self.gamma * (1-done)*(q_next - self.entropy_coeff * logp_pi)
 
-        if target.shape != Q1.shape: raise Exception(Q1.shape, target.shape, reward.shape, Q_next.shape, logp_pi.shape)
+        if target.shape != q1.shape: raise Exception(q1.shape, target.shape, reward.shape, q_next.shape, logp_pi.shape)
         
-        loss_critic = F.mse_loss(Q1, target) + F.mse_loss(Q2, target)
+        loss_critic = F.mse_loss(q1, target) + F.mse_loss(q2, target)
         self.critic_optimizer.zero_grad()
         loss_critic.backward()
         tr.nn.utils.clip_grad_norm_(self.critic.parameters(), self.grad_clip_critic)
@@ -161,11 +154,11 @@ class SACAgent(nn.Module):
             p.requires_grad = False
 
         proposed_action, logp_pi = self.actor(state, with_logprob=True)
-        Q1, Q2 = self.critic(state, proposed_action)
-        Q = tr.min(Q1, Q2)
-        logp_pi = logp_pi.unsqueeze(1)
-        if Q.shape != logp_pi.shape: raise Exception('Shape Missmatch (Q, logp_pi):', Q.shape, logp_pi.shape)
-        loss_actor = (self.entropy_coeff * logp_pi - Q).mean()
+        q1, q2 = self.critic(state, proposed_action)
+        q = tr.min(q1, q2)
+        #logp_pi = logp_pi.unsqueeze(1)
+        if q.shape != logp_pi.shape: raise Exception('Shape Missmatch (Q, logp_pi):', q.shape, logp_pi.shape)
+        loss_actor = (self.entropy_coeff * logp_pi - q).mean()
         loss_actor.backward()
         tr.nn.utils.clip_grad_norm_(self.actor.parameters(), self.grad_clip_actor)
         self.actor_optimizer.step()
@@ -177,7 +170,6 @@ class SACAgent(nn.Module):
     
     def decay_entropy(self):
         self.entropy_coeff *= self.entropy_decay_factor
-
 
 
 class MinimalAgent(nn.Module):
@@ -255,7 +247,7 @@ class MinimalAgent(nn.Module):
         self._update_target_networks()
 
         return loss_actor, loss_critic
-    
+
 
 class MergedSAC(nn.Module):
     def __init__(self, config, device):
@@ -305,3 +297,56 @@ class MergedSAC(nn.Module):
         
     def critic(self, state, action):
         pass
+
+
+class DeepQAgent(nn.Module):
+    def __init__(self, config):
+        super(DeepQAgent, self).__init__()
+        self.net = nn.Sequential(
+            nn.Linear(config['state_dim'], 64),
+            nn.LeakyReLU(),
+            nn.Linear(64, 64),
+            nn.LeakyReLU(),
+            nn.Linear(64, config['action_dim'])
+        )
+        self.replay_buffer = ReplayBuffer(config['replay_buffer_size'])
+        self.gamma = config['future_discount_factor']
+        self.batch_size = config['batch_size']
+        self.polyak_tau = config['polyak_tau']
+        self.loss = nn.MSELoss()
+
+        self.optimizer = tr.optim.Adam(self.net.parameters(), lr=config['learning_rate'])
+        self.target_net = deepcopy(self.net)
+        for p in self.target_net.parameters():
+            p.requires_grad = False
+
+    def forward(self, state):
+        return self.net(state)
+
+    def policy(self, state, eps):
+        if np.random.uniform() < eps:
+            action_idx = np.random.randint(8)
+        else:
+            action_idx = tr.argmax(self.net(state), dim=1).item()
+
+        angle = action_idx * 2 * np.pi / 8
+        return angle
+
+    def update(self):
+        state, action, reward, next_state, terminated = self.replay_buffer.sample(self.batch_size)
+
+        target = reward + self.gamma * (1 - terminated) * tr.max(self.target_net(next_state), dim=1)
+        prediction = tr.max(self.net(state), dim=1)[0]
+        if target.shape != prediction.shape: raise ValueError("Shapes don't match")
+        loss = self.loss(prediction, target)
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        self._update_target_networks()
+
+    def _update_target_networks(self):
+        with tr.no_grad():
+            for p, p_target in zip(self.net(), self.target_net()):
+                p_target.data.mul_(self.polyak_tau)
+                p_target.data.add_((1 - self.polyak_tau) * p.data)

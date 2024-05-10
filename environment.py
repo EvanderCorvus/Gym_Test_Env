@@ -56,8 +56,6 @@ class Environment(gym.Env):
 
 
         #rewards = self._get_reward(next_states)
-            
-        
         rewards = self._dummy_reward(next_states)
 
         # Sanity Check

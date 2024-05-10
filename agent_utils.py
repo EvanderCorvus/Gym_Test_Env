@@ -36,8 +36,8 @@ class ReplayBuffer(object):
     def __len__(self):
         return len(self._storage)
 
-    def add(self, state, action, reward, next_state):
-        data = (state, action, reward, next_state)
+    def add(self, state, action, reward, next_state, done):
+        data = (state, action, reward, next_state, done)
 
         if self._next_idx >= len(self._storage):
             self._storage.append(data)
@@ -46,37 +46,20 @@ class ReplayBuffer(object):
         self._next_idx = (self._next_idx + 1) % self._maxsize
 
     def _encode_sample(self, idxes):
-        states, actions, rewards, next_states = [], [], [], []
+        states, actions, rewards, next_states, dones = [], [], [], [], []
         for i in idxes:
             data = self._storage[i]
-            state, action, reward, next_state = data
+            state, action, reward, next_state, done = data
             states.append(state)
             actions.append(action)
             rewards.append(reward)
             next_states.append(next_state)
+            dones.append(done)
             
-        return np.array(states), np.array(actions), np.array(rewards), np.array(next_states)
+        return np.array(states), np.array(actions), np.array(rewards), np.array(next_states), np.array(dones)
 
     
     def sample(self, batch_size):
-        """Sample a batch of experiences.
-
-        Parameters
-        ----------
-        batch_size: int
-            How many transitions to sample.
-
-        Returns
-        -------
-        obs_batch: tr.tensor
-            batch of observations
-        act_batch: tr.tensor
-            batch of actions executed given obs_batch
-        rew_batch: tr.tensor
-            rewards received as results of executing act_batch
-        next_obs_batch: tr.tensor
-            next set of observations seen after executing act_batch
-        """
         storage_length = len(self._storage)
         idxes = [random.randint(0, storage_length - 1) for _ in range(min(storage_length, batch_size))]
         return self._encode_sample(idxes)

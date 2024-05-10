@@ -5,12 +5,12 @@ from numpy import random as rnd
 
 def train_epoch(train_env, agent, current_epoch, device, writer = None):
     rewards = 0
-    train_env.reset()
-    # Enforce Custom Init
-    theta_init = rnd.uniform(3*np.pi/4, np.pi)*rnd.choice([-1,1])
-    thetadot_init = rnd.uniform(-1.,1)
-    train_env.state = np.array([theta_init, thetadot_init])
-    state = np.array([np.cos(theta_init), np.sin(theta_init), thetadot_init])
+    state, _ = train_env.reset()
+    # # Enforce Custom Init
+    #theta_init = rnd.uniform(3*np.pi/4, np.pi)*rnd.choice([-1,1])
+    #thetadot_init = rnd.uniform(-1.,1)
+    #train_env.state = np.array([theta_init, thetadot_init])
+    #state = np.array([np.cos(theta_init), np.sin(theta_init), thetadot_init])
 
     step = 0
     while True:
@@ -21,15 +21,16 @@ def train_epoch(train_env, agent, current_epoch, device, writer = None):
         agent.replay_buffer.add(state,
                                 action,
                                 [reward], 
-                                next_state)
+                                next_state,
+                                [terminated])
 
         loss_actor, loss_critic = agent.update()
 
         if writer != None:
-            writer.add_scalar('loss_actor', loss_actor, (200*current_epoch)+step)
-            writer.add_scalar('loss_critic', loss_critic, (200*current_epoch)+step)
-            writer.add_scalar('reward', reward, (200*current_epoch)+step)
-            writer.add_scalar('action', action, (200*current_epoch)+step)
+            writer.add_scalar('loss_actor', loss_actor, (999*current_epoch)+step)
+            writer.add_scalar('loss_critic', loss_critic, (999*current_epoch)+step)
+            writer.add_scalar('reward', reward, (999*current_epoch)+step)
+            writer.add_scalar('action', action, (999*current_epoch)+step)
 
         rewards += reward
         state = next_state
@@ -43,11 +44,11 @@ def train_epoch(train_env, agent, current_epoch, device, writer = None):
     agent.decay_entropy()
     return rewards, loss.item()
 
-def test_loop(agent, device):
-    test_env = gym.make('Pendulum-v1', g=9.81, render_mode='human')
+def test_loop(agent, device, env_id):
+    test_env = gym.make(env_id, render_mode='human')
     # Test Loop:
     state, _ = test_env.reset()
-    for _ in range(800):
+    for _ in range(999):
         state = tr.from_numpy(state).to(device).float()
         action = agent.act(state)
         env_action = action.cpu().detach().numpy()
