@@ -1,7 +1,7 @@
 import torch as tr
 import gymnasium as gym
 import numpy as np
-from numpy import random as rnd
+from utils import *
 
 def train_epoch(train_env, agent, current_epoch, device, writer = None):
     rewards = 0
@@ -48,16 +48,21 @@ def train_epoch(train_env, agent, current_epoch, device, writer = None):
     #agent.decay_entropy()
     return rewards, loss#.item()
 
-def test_loop(agent, device, env_id):
-    test_env = gym.make(env_id, render_mode='human')
+def test_loop(agent, env_id, experiment_number):
+    frames = []
+    test_env = gym.make(env_id, render_mode='rgb_array')
     # Test Loop:
     state, _ = test_env.reset()
     rewards = 0
     for _ in range(600):
+        frame = test_env.render()
+        frames.append(frame)
         action = agent.act(state)
         state, reward, terminated, truncated, _ = test_env.step(action)
         rewards += reward
         if terminated or truncated:
             state, _ = test_env.reset()            
     test_env.close()
-    return rewards
+    np.save(f'logs/{env_id}/experiments/{experiment_number}/frames.npy', frames)
+    make_video(env_id, experiment_number)
+    return rewards/600

@@ -1,6 +1,7 @@
 import configparser
 import numpy as np
 import ast
+import cv2
 
 def hyperparams_dict(section):
     config = configparser.ConfigParser()
@@ -19,3 +20,13 @@ def hyperparams_dict(section):
             typed_params[key] = value
     
     return typed_params
+
+
+def make_video(env_id, experiment_number, fps=30):
+    frames = np.load(f'logs/{env_id}/experiments/{experiment_number}/frames.npy')
+    height, width, _ = frames[0].shape
+    fourcc = cv2.VideoWriter.fourcc(*'mp4v')
+    video = cv2.VideoWriter(f'logs/{env_id}/experiments/{experiment_number}/video.mp4',fourcc, fps, (width, height))
+    for frame in frames:
+        video.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+    video.release()

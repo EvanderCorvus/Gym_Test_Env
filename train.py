@@ -34,5 +34,5 @@ for epoch in tqdm(range(int(config['n_epochs']))):
 writer.close()
 train_env.close()
 
-rewards = test_loop(agent, device, env_id)
-print(f"Test rewards: {rewards}")
+avg_rewards = test_loop(agent, env_id)
+f'Average Reward: {avg_rewards}'
