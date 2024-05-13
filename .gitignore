@@ -2,3 +2,4 @@ gym_train.sh
 hparam_scan.sh
 __pycache__/
 logs/
+test.py
